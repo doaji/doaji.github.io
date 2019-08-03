@@ -1,0 +1,419 @@
+﻿<html>
+<head>
+    <script src="https://code.jquery.com/jquery-3.4.1.slim.min.js"
+            integrity="sha256-pasqAKBDmFT4eHoN2ndd6lN370kFiGUFyTiUHWhU7k8="
+            crossorigin="anonymous"></script>
+    <script src="linkedlist.js"></script>
+    <!-- Load d3.js & color scale -->
+    <script src="https://d3js.org/d3.v4.js"></script>
+    <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+    <!-- Optional theme -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+
+    <script>
+        var atmpData = [];
+        var direction = 'f';
+        var pie, svg, arc, outerArc, radius, outerRadius, innerRadius, color;
+        // Create dummy data
+        var n = 10, data, pdata, rawdata, currentState = 1;
+        let ll = new DoublyList();
+
+        // parse a date in yyyy-mm-dd format
+        function parseDate(input) {
+            var parts = input.match(/(\d+)/g);
+            // new Date(year, month [, date [, hours[, minutes[, seconds[, ms]]]]])
+            return new Date(parts[0], parts[1] - 1, parts[2]); // months are 0-based
+        }
+        $(function () {
+            loadData();
+            setTimeout(function () {
+                loadChart();
+            }, 500);
+
+        });
+        function loadData() {
+            d3.csv("data.csv", function (error, rawdata) {
+                var filtered = rawdata.filter(function (d) {
+                    if (d.dt_code == 'T' && d.cat_indent == '1' && d.cat_code[0]!='A') {
+                        return d;
+                    }
+                });
+                pdata = filtered.map(function (d) {
+                    return {
+                        date: d.per_name,
+                        category: d.cat_desc,
+                        value: (d.val) * 1000000,
+                        year: parseDate(d.per_name).getFullYear()
+                    };
+                });
+                console.log(pdata);
+
+                // group by yrs
+                pdata = d3.nest() // nest function allows to group the calculation per level of a factor
+                    .key(function (d) { return d.year; })
+                    .entries(pdata);
+
+                var sum;
+
+                pdata.forEach(function (arr) {// foreach year
+                    var catdata = d3.nest() // group by cat
+                        .key(function (d) { return d.category; })
+                        .entries(arr.values);
+                    sum = 0;
+                    catdata.forEach(function (d) {// for each cat .. add to atmpData
+                        atmpData.push({
+                            year: arr.key,
+                            category: d.key,
+                            value: getSum(d.values)
+                        });
+                    });
+
+                });
+
+                atmpData = d3.nest() // nest function allows to group the calculation per level of a factor
+                    .key(function (d) { return d.year; })
+                    .entries(atmpData);
+
+                atmpData.forEach(function (arr) {
+                    sum = 0;
+                    arr.values.forEach(function (d) {
+                        sum += d.value;
+                    });
+                    ll.add(arr.values.map(function (d) {
+                        return { data: d.value, ratio: ((d.value / sum) * 100).toFixed(2), sector: d.category, year: d.year };
+                    }).sort((a, b) => (a.sector > b.sector) ? 1 : -1));//
+
+                });
+                data = ll.head;
+                $('#labelbtn').text(data.data[0].year);
+            });
+
+
+
+
+
+            $('#prevbtn').prop('disabled', true);
+            $('#prevbtn').click(function () {
+                navigateData(false);
+            });
+            $('#nextbtn').click(function () {
+                navigateData(true);
+            });
+        }
+
+        function getSum(arr) {
+            var sum = 0;
+            arr.forEach(function (d) {
+                sum += d.value;
+            });
+            return sum;
+        }
+        function loadChart() {
+            // set the dimensions and margins of the graph
+            var width = 800
+            height = 800
+            margin = 40
+
+            // The radius of the pieplot is half the width or half the height (smallest one). I subtract a bit of margin.
+            radius = Math.min(width, height) / 2 - 160
+            outerRadius = radius * 0.5,
+                innerRadius = radius * 0.8;
+            // append the svg object to the div called 'my_dataviz'
+            svg = d3.select("#my_dataviz")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("class", "arc")
+                .attr("transform", "translate(" + width / 2 + "," + height / 2 + ")");
+
+
+
+
+
+
+            // set the color scale
+            color = d3.scaleOrdinal(d3.schemeCategory10);
+
+            // Compute the position of each group on the pie:
+            pie = d3.pie()
+                .sort(null) // Do not sort group by size
+                .value(d => d.ratio);
+
+
+            // The arc generator
+            arc = d3.arc()
+
+            // Another arc that won't be drawn. Just for labels positioning
+            outerArc = d3.arc()
+                .innerRadius(radius * 0.9)
+                .outerRadius(radius * 0.9)
+
+            // Build the pie chart: Basically, each part of the pie is a path that we build using the arc function.
+            svg
+                .selectAll('allSlices')
+                .data(arcs(data.data, data.next.data))
+                .enter()
+                .append('path')
+                .attr('d', arc)
+                .attr('fill', function (d) {
+                    return (color(d.data.sector))
+                })
+                .attr("stroke", "white")
+                .style("stroke-width", "2px")
+                .style('cursor','pointer')
+                .style("opacity", 0.7);
+
+
+
+
+
+            setLabels(1);
+
+        }
+        function navigateData(forward) {
+
+            transition(forward);
+            $('#labelbtn').text(data.data[0].year);
+            setLabels(forward);
+            if (data == ll.tail) {
+                // disable next
+                $('#nextbtn').prop('disabled', true);
+            } else {
+                $('#nextbtn').prop('disabled', false);
+            }
+            if (data == ll.head) {
+                //disable previous
+                $('#prevbtn').prop('disabled', true);
+            } else {
+                $('#prevbtn').prop('disabled', false);
+            }
+        }
+        function arcs(data0, data1) {
+            var arcs0 = pie(data0),
+                i = -1,
+                arc;
+            if (data1) {
+                arcs1 = pie(data1)
+            }
+            while (++i < data0.length) {
+                arc = arcs0[i];
+                arc.innerRadius = innerRadius;
+                arc.outerRadius = outerRadius;
+                if (arcs1) {
+                    arc.next = arcs1[i];
+                }
+
+            }
+            return arcs0;
+        }
+        function transition(state) {
+            if ((state && data == ll.tail) || (!state && data == ll.head)) {
+                return;
+            }
+            var path = d3.selectAll(".arc > path")
+                .data(state ? arcs(data.data, data.next.data) : arcs(data.data, data.previous.data));
+
+
+
+            // Wedges split into two rings.
+            var t0 = path.transition()
+                .duration(1000)
+                .attrTween("d", tweenArc(function (d, i) {
+                    pointA = i & 1 ? innerRadius : (innerRadius + outerRadius) / 2;
+                    pointB = i & 1 ? (innerRadius + outerRadius) / 2 : outerRadius;
+                    var a0 = d.next.startAngle + d.next.endAngle,
+                        a1 = d.startAngle - d.endAngle;
+                    return {
+                        innerRadius: pointA,
+                        outerRadius: pointB,
+                        startAngle: (a0 + a1) / 2,
+                        endAngle: (a0 - a1) / 2
+                    };
+                }));
+
+
+
+            // Wedges then update their values, changing size.
+            var t2 = t0.transition()
+                .attrTween("d", tweenArc(function (d, i) {
+                    return {
+                        startAngle: d.next.startAngle,
+                        endAngle: d.next.endAngle,
+                        innerRadius: innerRadius,
+                        outerRadius: outerRadius
+                    };
+                }));
+            t2.on("start", myTransationStartCallback)
+                .on("end", myTransationEndCallback);
+
+
+            if (state && data.next) {
+                data = data.next;
+            }
+
+            if (!state && data.previous) {
+                data = data.previous;
+            }
+        }
+        var transitions = 0;
+        function myTransationStartCallback() {
+            transitions++;
+        }
+        function myTransationEndCallback(i, t) {
+            //alert('Done');
+            if (--transitions === 0) {
+                //setLabels(true);
+                console.log('Done');
+            }
+        }
+
+        function setLabels(state) {
+            var datax;
+            if ((state && data == ll.tail) || (!state && data == ll.head)) {
+                datax = arcs(data.data, null);
+            } else {
+                datax = state ? arcs(data.data, data.next.data) : arcs(data.data, data.previous.data);
+            }
+            svg.selectAll("polyline").remove()
+            // Add the polylines between chart and labels:
+            svg
+                .selectAll('allPolylines')
+                .data(datax)
+                .enter()
+                .append('polyline')
+                .attr("stroke", "black")
+                .style("fill", "none")
+                .attr("stroke-width", 1)
+                .attr('points', function (d) {
+                    var posA = arc.centroid(d) // line insertion in the slice
+                    var posB = outerArc.centroid(d) // line break: we use the other arc generator that has been built only for that
+                    var posC = outerArc.centroid(d); // Label position = almost the same as posB
+                    var midangle = d.startAngle + (d.endAngle - d.startAngle) / 2 // we need the angle to see if the X position will be at the extreme right or extreme left
+                    posC[0] = radius * 0.95 * (midangle < Math.PI ? 1 : -1); // multiply by 1 or -1 to put it on the right or on the left
+                    return [posA, posB, posC]
+                });
+
+
+            svg.selectAll('.label').remove()
+            // Add the polylines between chart and labels:
+            svg
+                .selectAll('allLabels')
+                .data(datax)
+                .enter()
+                .append('text')
+                .attr('class', 'label')
+                .style('cursor', 'pointer')
+                .text(function (d) {
+                    return d.data.sector;
+                })
+                .attr('transform', function (d) {
+                    var pos = outerArc.centroid(d);
+                    var midangle = d.startAngle + (d.endAngle - d.startAngle) / 2
+                    pos[0] = radius * 0.99 * (midangle < Math.PI ? 1 : -1);
+                    return 'translate(' + pos + ')';
+                })
+                .style('text-anchor', function (d) {
+                    var midangle = d.startAngle + (d.endAngle - d.startAngle) / 2
+                    return (midangle < Math.PI ? 'start' : 'end')
+                });
+
+            // add tooltip to mouse events on slices and labels
+            d3.selectAll('.label, path').call(toolTip);
+        }
+
+        function tweenArc(b) {
+            return function (a, i) {
+                var d = b.call(this, a, i),
+                    i = d3.interpolate(a, d);
+                for (var k in d) {
+                    a[k] = d[k]; // update data
+                }
+                return function (t) {
+                    var ss = i(t);
+                    var res = arc(ss);
+                    return res;
+                };
+            };
+        }
+
+        var formatComma = d3.format(","),
+            formatMoney = function (d) { return "$" + formatComma(d); };
+
+        // function that creates and adds the tool tip to a selected element
+        function toolTip(selection) {
+
+            // add tooltip (svg circle element) when mouse enters label or slice
+            selection.on('mouseover', function (data) {
+
+                svg.append('text')
+                    .attr('class', 'toolCircle')
+                    .attr('dy', -15) // hard-coded. can adjust this to adjust text vertical alignment in tooltip
+                    .html(toolTipHTML(data)) // add text to the circle.
+                    .style('font-size', '.9em')
+                    .style('text-anchor', 'middle'); // centres text in tooltip
+                var xx = color(data.data.ratio);
+                svg.append('circle')
+                    .attr('class', 'toolCircle')
+                    .attr('r', radius * 0.50) // radius of tooltip circle
+                    .style('fill', color(data.data.sector)) // colour(data.data[category]) colour based on category mouse is over
+                    .style('fill-opacity', 0.5);
+
+            });
+
+            selection.on("click", function (d, i) {
+                var year;
+                if (this.nodeName == 'path') {
+                    year = parseInt(d.data.year) + 1;
+                } else {
+                    year = d.data.year;
+                }
+                location.href = 'lines4.html?cat=' + encodeURI(d.data.sector) + '&year=' + year;
+            })
+
+            // remove the tooltip when mouse leaves the slice/label
+            selection.on('mouseout', function () {
+                d3.selectAll('.toolCircle').remove();
+            });
+        }
+
+        // function to create the HTML string for the tool tip. Loops through each key in data object
+        // and returns the html string key: value
+        function toolTipHTML(data) {
+
+            var tip = '';
+
+            tip += '<tspan x="0">' + data.data.ratio + '%</tspan>';
+            tip += '<tspan x="0" dy="1.2em">' + data.data.sector + '</tspan>';
+            tip += '<tspan x="0" dy="1.2em">' + formatMoney(data.data.data) + '</tspan>';
+
+            return tip;
+        }
+
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="well">
+            <h2>U.S. Construction Spending, by value and category, 2002-16</h2>
+            <div>The Value of Construction Put in Place Survey provides monthly estimates of the total dollar value of construction work done in the U.S. The survey covers construction work done each month on new structures or improvements to existing structures for private and public sectors. Data provided by Enigma.io from the U.S. Department of Commerce.</div>
+        </div>
+        <div class="btn-toolbar" style="padding-top:10px;">
+            <div class="btn-group">
+                <button id="prevbtn" class="btn btn-default"><span class="glyphicon glyphicon-backward"></span> Previous</button>
+                <button id="labelbtn" class="btn btn-default" disabled>y</button>
+                <button id="nextbtn" class="btn btn-default"><span class="glyphicon glyphicon-forward"></span> Next</button>
+            </div>
+        </div>
+        <div>(Click on a sector to dig deeper)</div>
+        <!-- Create a div where the graph will take place -->
+        <div id="my_dataviz"></div>
+    </div>
+</body>
+</html>

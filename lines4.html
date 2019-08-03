@@ -1,0 +1,347 @@
+﻿<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+    body {
+        font: 12px Arial;
+    }
+
+    path {
+        stroke: steelblue;
+        stroke-width: 2;
+        fill: none;
+    }
+
+    .axis path,
+    .axis line {
+        fill: none;
+        stroke: grey;
+        stroke-width: 1;
+        shape-rendering: crispEdges;
+    }
+</style>
+<head>
+    <!--<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>-->
+    <script src="https://code.jquery.com/jquery-3.4.1.slim.min.js"
+            integrity="sha256-pasqAKBDmFT4eHoN2ndd6lN370kFiGUFyTiUHWhU7k8="
+            crossorigin="anonymous"></script>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+    <!-- Optional theme -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+
+    <script>
+        $.urlParam = function (name) {
+            var results = new RegExp('[\?&]' + name + '=([^&#]*)')
+                .exec(window.location.search);
+
+            return (results !== null) ? decodeURI(results[1]) || 0 : false;
+        }
+        // parse a date in yyyy-mm-dd format
+        function parseDate(input) {
+            var parts = input.match(/(\d+)/g);
+            // new Date(year, month [, date [, hours[, minutes[, seconds[, ms]]]]])
+            return new Date(parts[0], parts[1] - 1, parts[2]); // months are 0-based
+        }
+        var color,sumstat, pdata, x, y, tipBox, monthFormat, tooltip, tooltipLine,selectedyear ;
+        var margin = { top: 30, right: 240, bottom: 30, left: 100 },
+            width = 1040 - margin.left - margin.right,
+            height = 600 - margin.top - margin.bottom;
+
+        $(function () {
+            loadData();
+            setTimeout(function () {
+                loadChart();
+            }, 500);
+        });
+
+
+        function loadData() {
+            // Get the data
+            selectedyear = $.urlParam('year') ? $.urlParam('year') : 2002;
+            $('#yearLabel').text(selectedyear);
+            d3.csv("data.csv", function (error, rawdata) {
+                var filtered = rawdata.filter(function (d) {
+                    if (d.dt_code == 'T' && d.cat_indent == '1' && d.cat_code[0] != 'A' && parseDate(d.per_name).getFullYear() == selectedyear) {
+                        return d;
+                    }
+                });
+                pdata = filtered.map(function (d) {
+                    return {
+                        date: d.per_name,
+                        category: d.cat_desc,
+                        value: (d.val) * 1000000,
+                        month: parseDate(d.per_name)
+                    };
+                });
+                console.log(pdata);
+
+                // group the data: I want to draw one line per group
+                sumstat = d3.nest() // nest function allows to group the calculation per level of a factor
+                    .key(function (d) { return d.category; })
+                    .entries(pdata);
+
+                sumstat = sumstat.sort((a, b) => (a.key > b.key) ? 1 : -1);
+            });
+        }
+
+        function loadChart() {
+
+
+            x = d3.time.scale()
+                .range([0, width]);
+
+            y = d3.scale.linear()
+                .range([height, 0]);
+
+            color = d3.scale.category10();
+            monthFormat = d3.time.format("%b");
+            var xAxis = d3.svg.axis()
+                .scale(x)
+                .tickFormat(monthFormat)
+                .orient("bottom");//.ticks(4);
+
+            var yAxis = d3.svg.axis()
+                .scale(y)
+                .orient("left");
+
+
+            var line = d3.svg.line()
+                .interpolate("basis")
+                .x(function (d) {
+                    return x(d.month);
+                })
+                .y(function (d) {
+                    return y(d.value);
+                });
+
+            var svg = d3.select("#my_dataviz")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+
+
+
+            color.domain(sumstat.map(function (d) { return d.key }));
+
+            // Scale the range of the data
+            x.domain(d3.extent(sumstat[0].values, function (d) { return d.month; }));
+            y.domain([
+                d3.min(sumstat, function (c) {
+                    var mi = d3.min(c.values, function (v) {
+                        return v.value;
+                    });
+                    return mi;
+                }),
+                d3.max(sumstat, function (c) {
+                    var ma = d3.max(c.values, function (v) {
+                        return v.value;
+                    });
+                    return ma;
+                })
+            ]);
+
+            var legend = svg.selectAll('g')
+                .data(sumstat)
+                .enter()
+                .append('g')
+                .attr('class', 'legend');
+
+            legend.append('rect')
+                .attr('x', width + 6)
+                .attr('y', function (d, i) {
+                    return i * 20;
+                })
+                .attr('width', 10)
+                .attr('height', 10)
+                .style('fill', function (d) {
+                    return color(d.key);
+                });
+
+            legend.append('text')
+                .attr("class", "text")
+                .attr("id", function (d, i) { return "text_id" + i; })
+                .attr('x', width + 20)
+                .attr('y', function (d, i) {
+                    return (i * 20) + 9;
+                })
+                .text(function (d) {
+                    return d.key;
+                })
+                .style('cursor', 'pointer')
+                .style('opacity', setOpacity);
+
+            svg.append("g")			// Add the X Axis
+                .attr("class", "x axis")
+                .attr("transform", "translate(0," + height + ")")
+                .call(xAxis);
+
+            svg.append("g")			// Add the Y Axis
+                .attr("class", "y axis")
+                .call(yAxis)
+                .append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("y", 6)
+                .attr("dy", ".71em")
+                .style("text-anchor", "end")
+                .text("Value ($)");
+
+            var catline = svg.selectAll(".catline")
+                .data(sumstat)
+                .enter().append("g")
+                .attr("class", "catline");
+
+            catline.append("path")
+                .attr("class", "line")
+                .attr("id", function (d, i) { return "id" + i; })
+                .attr("d", function (d) {
+                    return line(d.values);
+                })
+                .style('opacity', setOpacity)
+                .style("stroke", function (d) {
+                    return color(d.key);
+                })
+                .style('cursor', 'pointer');
+
+            // add tooltip to mouse events on slices and labels
+            d3.selectAll('.text, .line').call(toolTip);
+
+            tipBox = svg.append('rect')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('opacity', 0)
+                .on('mousemove', drawTooltip)
+                .on('mouseout', removeTooltip);
+
+            tooltip = d3.select('#tooltip');
+            tooltipLine = svg.append('line');
+        }
+
+        function toolTip(selection) {
+
+            selection.on("click", function (d, i) {
+                location.href = 'lines5.html?cat=' + encodeURI(d.values[0].category) + '&year=' + selectedyear;
+            });
+            selection.on("mouseover", function (d, i) {
+                d3.selectAll(".text").style("opacity", function (o) {
+                    if (d.key == o.key) {
+                        return 1;
+                    } else {
+                        return 0.1;
+                    }
+                });
+                d3.selectAll(".line").style("opacity", function (o) {
+                    if (d.key == o.key) {
+                        return 1;
+                    } else {
+                        return 0.1;
+                    }
+                });
+            });
+
+            selection.on("mouseout", function (d, i) {
+                d3.selectAll(".text").style('opacity', setOpacity);
+                d3.selectAll(".line").style('opacity', setOpacity);
+            });
+        }
+
+        function setOpacity(d) {
+            if (d.key == $.urlParam('cat')) {
+                return 1;
+            } else {
+                return 0.1;
+            }
+        }
+
+        function removeTooltip() {
+            if (tooltip) tooltip.style('display', 'none');
+            if (tooltipLine) tooltipLine.attr('stroke', 'none');
+        }
+        var bisectDate = d3.bisector(function (d) {
+            var x = 0;
+            return d.month;
+        }).left;
+        var formatComma = d3.format(","),
+            formatMoney = function (d) { return "$" + formatComma(d); };
+        function drawTooltip() {
+            var x0 = x.invert(d3.mouse(this)[0]),
+                i = bisectDate(pdata, x0, 1),
+                d0 = pdata[i - 1],
+                d1 = pdata[i],
+                d = x0 - d0.month > d1.month - x0 ? d1 : d0;
+            const month = d.month;// monthFormat(d.month);
+
+            sumstat.sort(function (a, b) {
+                var b = b.values.filter(function (t) {
+                    if (monthFormat(t.month) == monthFormat(month)) {
+                        return t;
+                    }
+                });
+                var a = a.values.filter(function (t) {
+                    if (monthFormat(t.month) == monthFormat(month)) {
+                        return t;
+                    }
+                });
+                return b[0].value - a[0].value;
+            });
+
+            tooltipLine.attr('stroke', 'black')
+                .attr('x1', x(month))
+                .attr('x2', x(month))
+                .attr('y1', 0)
+                .attr('y2', height);
+
+            tooltip.html(monthFormat(month) + ' ' + selectedyear)
+                .style('display', 'block')
+                .style('left', d3.event.pageX + 20)
+                .style('top', d3.event.pageY - 20)
+                .selectAll()
+                .data(sumstat).enter()
+                .append('div')
+                .style('color', function (d) {
+                    return color(d.key);
+                })
+                .html(function (d) {
+                    // get month
+                    var m = d.values.filter(function (t) {
+                        if (monthFormat(t.month) == monthFormat(month)) {
+                            return t;
+                        }
+                    });
+                    if (d.key == $.urlParam('cat')) {
+                        return '<b>' + d.key + ' : ' + formatMoney(m[0].value) + '</b>';
+                    } else {
+                        return '<span style="opacity:0.5;">' + d.key + ' : ' + formatMoney(m[0].value)+'</span>';
+                    }
+                   
+                });
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="well">
+            <h2>U.S. Construction Spending, by value and category, 2002-16</h2>
+            <div>The Value of Construction Put in Place Survey provides monthly estimates of the total dollar value of construction work done in the U.S. The survey covers construction work done each month on new structures or improvements to existing structures for private and public sectors. Data provided by Enigma.io from the U.S. Department of Commerce.</div>
+        </div>
+        <!-- Create a div where the graph will take place -->
+        <div id='tooltip' style='position:fixed;background-color:#e2e2e2;padding:5px;display:none;right:10px;'></div>
+
+        <div class="btn-toolbar" style="padding-top:10px;">
+            <div class="btn-group">
+                <a class="btn btn-default" href="donut.html"><span class="glyphicon glyphicon-home"></span> Back to Start</a>
+            </div>
+        </div>
+        <div>(Click on a sector to dig deeper)</div>
+        <h3 id="yearLabel"></h3>
+        <div id="my_dataviz"></div>
+    </div>
+</body>
